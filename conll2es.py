@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 from pymongo import InsertOne,ReplaceOne,MongoClient
+import json
 ESL_DEP_TYPES = ['NSUBJ', 'DOBJ', 'IOBJ', 'NSUBJPASS', 'AMOD', 'NN', 'ADVMOD', 'PARTMOD', 'PREP', 'POBJ', 'PRT'
 ,'COMPOUND','COMPOUND:PRT','CASE']  #'NMOD'TODO……
 
@@ -16,13 +17,25 @@ db = dbc.admin
 db.authenticate('root', 'root')
 poss = list(dbc.common.poss.find())
 pt2i = dict([(p['pt'], p['_id']) for p in poss])
+info=json.load(open('info.json'))
+
 
 def is_esl_dep(dt, t, td):
-    return _is_esl_dep((dt, None, None, (None, t['l'], t['pt']), (None, td['l'], td['pt'])))
+	#print t
+	return _is_esl_dep((dt, None, None, (None, t['l'], t['pt']), (None, td['l'], td['pt'])))
 
 def convert_dep(dt, t, td):
     dt, t1, t2 = _convert_dep((dt, t, td, (None, t['l'], t['pt']), (None, td['l'], td['pt'])))
     return {'dt': dt, 'l1': t1['l'], 'i1': t1['i'], 'l2': t2['l'], 'i2': t2['i']}
+
+def save_info():
+	info={}
+	res=dbc.crawl.try2.find()
+	for r in res:
+		info[r['_id']]=r['vName']
+	f=open('info.json','w')
+	json.dump(info, f)
+	f.close()
 
 # format of d:
 # (type, None, None, token1, token2)
@@ -80,25 +93,29 @@ def _convert_dep(d):
 
 
 def main_procedure():
-	sentences = []
-	#xp=[{'p':'3882927'}]
-	#for p in db[venue].find():	
-
-	root='./parsed_new/new/'
+	root='./paper2/'
 	for name in os.listdir(root):
 		pid=name[:-6]
-		path = './parsed_new/new/'+name
+		path = root+name
 		with open(path, 'r') as fin:
 			text = fin.read()
 		#print text
 		_sentences = process_conll_file(pid, text)
+		if not os.path.exists('./'+info[pid]):
+    		os.mkdir('./'+info[pid])
+		
+		f=open('./'+info[pid]+'/'+pid+'.json','w')
 		for s in _sentences:
-			s['c']=venue
+			s['c']=info[pid]
 			#print s
-			sentences.append({'_index': 'test', '_type': 'sentences', '_source': s})
-		f=open(pid+'.json','w')
-		f.write(sentences)
+			json.dump({"index":{"_index":"sentences", '_type':info[pid]}}, f)
+			f.write('\n')
+			json.dump(s, f)
+			f.write('\n')
+				
 		f.close()
+
+
 		# try:
 		# 	with open(path, 'r') as fin:
 		# 		text = fin.read()
@@ -119,22 +136,26 @@ def process_conll_file(uid, text, token_dict=None, pos_dict=None, dep_dict=None)
 	# 1  Assimilation  assimilation  NN  _  3  nsubj
 	# 1  3  nsubj  =  nsubj(noun-3, verb-1)
 	sentences = []
+	
 	for s in text.split('\n\n'):
 		if not (s and s.strip()):
 			continue
-		tokens = [process_conll_line(l, token_dict, pos_dict, dep_dict) for l in s.split('\n')]
-		print tokens
+		tokens = [process_conll_line(l, token_dict, pos_dict, dep_dict) for l in s.split('\n') if l !='\n']
+		#print tokens
 		deps = []
+		token=[]
 		for i, t in enumerate(tokens):
 			assert t['i'] == i, 't[i] = %d, i = %d' % (t['_id'], i)
 			td = tokens[t['di']]
 			if is_esl_dep(t['dt'], td, t):
 				deps.append(convert_dep(t['dt'], td, t))
-			del t['dt'], t['di'],t['i'],t['pt']
-		sentences.append({'p': uid,'t': tokens, 'd': deps})
+			del t['dt'], t['di']#,t['i'],t['pt']
+			token.append({'t':t['t'],'l':t['l']})
+		sentences.append({'p': uid,'t': token, 'd': deps})
 	return sentences
 
 def process_conll_line(l, token_dict, pos_dict, dep_dict):
+	#print 'nihao '+l
 	tt = l.split('\t')
 	assert len(tt) == 7, 'len(%s) = %d != 7' % (repr(tt), len(tt))
 	tt[2] = tt[2].lower()	# lemmas are in lower case!
@@ -153,6 +174,7 @@ def process_conll_line(l, token_dict, pos_dict, dep_dict):
 if __name__ == "__main__":
 	db=dbc.sentences
 	main_procedure()
+	#save_info()
 	# names=[]
 	# nc=[]
 	# for n in db.collection_names():
